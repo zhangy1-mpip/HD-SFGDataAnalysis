@@ -1,0 +1,24 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/
+
+# Conda / venv
+.env/
+.venv/
+
+# Data files (do NOT upload raw data)
+*.asc
+*.ASC
+*.dat
+*.csv
+*.txt
+
+# Figures / outputs
+*.pdf
+*.png
+
+# Local parameter folders
+Parameters/
