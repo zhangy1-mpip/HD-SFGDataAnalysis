@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import os
+from datetime import datetime
 from scipy.interpolate import PchipInterpolator as Pchi
 from scipy.constants import c
 from scipy.signal import savgol_filter
@@ -16,25 +17,25 @@ from scipy.signal import savgol_filter
 
 # ========== define of the variables ==========
 # reference material: The reference used to analyze the data. The value is either 'gold', 'zpz' (z-cut quartz) or 'D2O'.
-RefMaterial='gold'
+RefMaterial='zqz'
 # Media1 and 2 definition: Media1 is solid or air, Media2 is water or D2O
 # vis and IR light transmit from media 1 to media 2
 # Media 1 and 2 should be in the list of optical parameters
 # Media 2 is "H2O" or "D2O"
 # if Media1 is air, and Media2 is water, 
-Media1 = 'SiO2'
+Media1 = 'air'
 Media2 = 'H2O'
 # file path of parameter of the reference materials
-ParaPath = r'C:\Users\zhangy1\Data\Parameters' 
+ParaPath = r'C:\Users\zhangy1\Data\Scripts\Parameters' 
 # folder of the experiment files, including backgrounds, reference and experiment data
 # REMEMBER TO CHANGE THIS
-FolderPath = r'C:\Users\zhangy1\Data\HelicalTactoids\20251112\BTA-alpha ddm sol\asc\3rdcp'
+FolderPath = r'C:\Users\zhangy1\Data\Lipopeptide\SFG\20260106\asc\01'
 
 # experiment conditions
 # reference exposure time
-RefExposure = 10
+RefExposure = 120
 # sample exposure time
-SamExposure = 60
+SamExposure = 240
 
 # vis wavelength
 VisWavelength = 805.5
@@ -43,14 +44,15 @@ VisIncidentAngle = 64
 IRIncidentAngle = 50
 
 # phase correction for the phase drift
-PhaseCorr = 0
+PhaseCorr = 33
 
 # the window for plot
 Frequency_min = 2800
 Frequency_max = 3800
-Amplitude_min = -0.04
-Amplitude_max = 0.04
-
+Amplitude_min = -0.2
+Amplitude_max = 0.2
+ChiTwoFig_min = -3
+ChiTwoFig_max = 3
 # figure size in inch
 figwidth = 12
 figheight = 9
@@ -77,9 +79,9 @@ PlanckTaperFilterMin = 0.02     # set the minimum value of the filter, avoiding 
 
 # pre-ifft Happ-Genzel filter TimeDomainFilter in time domain
 # parameters for SFG peaks; T0 is the SFG/LO delay time
-T0LBoundary = 0.9     # filter starts at LBoundary*T0, 
+T0LBoundary = 0.8     # filter starts at LBoundary*T0, 
 T0RBoundary = 1.2     # filter ends at LBoundary*T0, T0 is the SFG/LO delay time
-HGWidthT0Ratio = 0.15  # [width of the ramping area]/T0, T0 is the SFG/LO delay time
+HGWidthT0Ratio = 0.2  # [width of the ramping area]/T0, T0 is the SFG/LO delay time
 # for reflection peaks, better not to use it; T1 is the reflection delay time
 T1LRel = 0.0        # filter starts at T1-T1LRelT1*T0
 T1RRel = 0.0        # filter ends at T1+T1LRelT1*T0
@@ -94,7 +96,7 @@ ValleyHGRatio = 0.3                 # width of HG ramping / width of T1 valley
 SG_WINDOW = 7       # has to be odd and <= number of frequencies
 SG_POLY = 3         # order of smoothing: =1: linear interpolation, =2 parabola interpolation, =3 cubic-parabola-linear combination 
 
-#========== file manipulation functions ==========
+# ========== file manipulation functions ==========
 
 # read the asc raw data file and sort the file according to the different
     # input FolderPath: the absolute path of the data storage folder 
@@ -135,7 +137,44 @@ def SortDataFile (FolderPath):
     
     return SortResult
 
-#========== scientific calculation functions ==========
+# ========== save the analysis parameters ==========
+def save_analysis_parameters():
+    script_path = os.path.abspath(__file__)
+    script_dir  = os.path.dirname(script_path)
+
+    start_marker = "# ========== define of the variables =========="
+    end_marker   = "# ========== file manipulation functions =========="
+
+    with open(script_path, "r", encoding="utf-8", errors="ignore") as f:
+        lines = f.readlines()
+
+    in_block = False
+    param_lines = []
+
+    for line in lines:
+        if start_marker in line:
+            in_block = True
+            param_lines.append(line)
+            continue
+        if end_marker in line and in_block:
+            param_lines.append(line)
+            break
+        if in_block:
+            param_lines.append(line)
+
+    if not param_lines:
+        raise RuntimeError("Parameter block not found. Check marker strings.")
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_name = f"parameter_{timestamp}.txt"
+    out_path = os.path.join(script_dir, out_name)
+
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.writelines(param_lines)
+
+    print(f"[INFO] Analysis parameters saved to: {out_path}")
+
+# ========== scientific calculation functions ==========
 
 # read and create interpolate function of the complex refractive index
     # SumFrequency: the wavenumber of the SFG signal (\omega_vis+\omega_ir)
@@ -733,12 +772,15 @@ def iFFTFromTimeToFrequency (TFiltered, PhaseCorr):
     # Unsort the time to ensure the correct order of data
     AmpForiFFT = np.fft.ifftshift(TFiltered)
     # phase correction
-    PhaseCorrRad = PhaseCorr*np.pi/180
+    PhaseCorrRad = np.deg2rad(PhaseCorr)
     # ifft
     iFFTAmp = np.fft.ifft(AmpForiFFT)*np.exp(1j * PhaseCorrRad)
     return iFFTAmp
 
 # ========== the main work flow ==========
+# ***** save the analysis parameters *****
+save_analysis_parameters()
+
 # ***** file manipulation *****
 # data file sort
 FileSortResult = SortDataFile(FolderPath)
@@ -892,7 +934,10 @@ else:
     print(r'[Exp Config INFO] The reference and sample are close enough in delay time.')
     # time domain filtration of the experiment data
     TFilteredSamp = TimeWindow*CompAmplitudeSamp
-    # iFFT from time domain to frequency domain 
+    # iFFT from time domain to frequency domain
+    # follow the common definition of the phase correction
+    if RefMaterial == 'zqz':
+        PhaseCorr = PhaseCorr - 90 
     iFFTCompAmpSamp = iFFTFromTimeToFrequency(TFilteredSamp, PhaseCorr)
 
 # calculate the average \chi^{(2)}_{eff}
@@ -1254,12 +1299,12 @@ ChiTwoMeasedPhase = axs3[1, 0]
 ChiTwo = axs3[1,1]
     # top left panel: measured \chi^{(2)}
 ChiTwoMeased.plot(IRWavenumber, np.real(ChiTwoMeasedMean), linewidth=1.5, color='blue', label=r'$\mathrm{Re}\left[\langle\chi^{(2)}_{\mathrm{measured}}\rangle\right]$')
-ChiTwoMeased.fill_between(IRWavenumber, ChiTwoMeasedMean.real-ChiTwoMeasedRealSTD, ChiTwoMeasedMean.real+ChiTwoMeasedRealSTD, color='blue', alpha=0.25)
+ChiTwoMeased.fill_between(IRWavenumber, (ChiTwoMeasedMean.real-ChiTwoMeasedRealSTD), (ChiTwoMeasedMean.real+ChiTwoMeasedRealSTD), color='blue', alpha=0.25)
 ChiTwoMeased.plot(IRWavenumber, np.imag(ChiTwoMeasedMean),linewidth=1.5, color='red', label=r'$\mathrm{Im}\left[\langle\chi^{(2)}_{\mathrm{measured}}\rangle\right]$')
-ChiTwoMeased.fill_between(IRWavenumber, ChiTwoMeasedMean.imag-ChiTwoMeasedImagSTD, ChiTwoMeasedMean.imag+ChiTwoMeasedImagSTD, color='red', alpha=0.25)
-for i in range(NumOfSamp):
-    ChiTwoMeased.plot(IRWavenumber, np.real(ChiTwoMeased_all[i, :]), linewidth=1.0, alpha=0.3)
-    ChiTwoMeased.plot(IRWavenumber, np.imag(ChiTwoMeased_all[i, :]), linewidth=1.0, alpha=0.3)
+ChiTwoMeased.fill_between(IRWavenumber, (ChiTwoMeasedMean.imag-ChiTwoMeasedImagSTD), (ChiTwoMeasedMean.imag+ChiTwoMeasedImagSTD), color='red', alpha=0.25)
+# for i in range(NumOfSamp):
+    # ChiTwoMeased.plot(IRWavenumber, np.real(ChiTwoMeased_all[i, :]), linewidth=1.0, alpha=0.3)
+    # ChiTwoMeased.plot(IRWavenumber, np.imag(ChiTwoMeased_all[i, :]), linewidth=1.0, alpha=0.3)
 ChiTwoMeased.set_xlabel(r'$\nu_{\mathrm{IR}} \mathrm{[cm^{-1}]}$')
 ChiTwoMeased.set_ylabel(r'$\chi^{(2)}_{\mathrm{measured}} \mathrm{[a.u.]}$')
 ChiTwoMeased.set_xlim(Frequency_min, Frequency_max)
@@ -1304,7 +1349,7 @@ ChiTwo.set_xlabel(r'$\nu_{\mathrm{IR}} \mathrm{[cm^{-1}]}$')
 ChiTwo.set_ylabel(r'$\chi^{(2)}$ component [$10^{-20}$ m/V]')
 ChiTwo.set_title(r'Tensor component $\chi^{(2)}$')
 ChiTwo.set_xlim(Frequency_min, Frequency_max)
-ChiTwo.set_ylim(-1.0, 1.0)
+ChiTwo.set_ylim(ChiTwoFig_min, ChiTwoFig_max)
 ChiTwo.grid(True)
 ChiTwo.legend()
 
