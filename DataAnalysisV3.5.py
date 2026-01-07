@@ -44,7 +44,7 @@ VisIncidentAngle = 64
 IRIncidentAngle = 50
 
 # phase correction for the phase drift
-PhaseCorr = 33
+PhaseCorr = 63
 
 # the window for plot
 Frequency_min = 2800
@@ -138,12 +138,11 @@ def SortDataFile (FolderPath):
     return SortResult
 
 # ========== save the analysis parameters ==========
-def save_analysis_parameters():
+def save_analysis_parameters(output_dir):
     script_path = os.path.abspath(__file__)
-    script_dir  = os.path.dirname(script_path)
 
     start_marker = "# ========== define of the variables =========="
-    end_marker   = "# ========== file manipulation functions =========="
+    end_marker   = "#========== file manipulation functions =========="
 
     with open(script_path, "r", encoding="utf-8", errors="ignore") as f:
         lines = f.readlines()
@@ -167,7 +166,9 @@ def save_analysis_parameters():
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_name = f"parameter_{timestamp}.txt"
-    out_path = os.path.join(script_dir, out_name)
+
+    os.makedirs(output_dir, exist_ok=True)
+    out_path = os.path.join(output_dir, out_name)
 
     with open(out_path, "w", encoding="utf-8") as f:
         f.writelines(param_lines)
@@ -779,7 +780,7 @@ def iFFTFromTimeToFrequency (TFiltered, PhaseCorr):
 
 # ========== the main work flow ==========
 # ***** save the analysis parameters *****
-save_analysis_parameters()
+save_analysis_parameters(FolderPath)
 
 # ***** file manipulation *****
 # data file sort
@@ -1355,7 +1356,7 @@ ChiTwo.legend()
 
 # analysis result saving
     # result of the normalized \chi^{(2)}
-out_lefttop = np.column_stack([IRWavenumber, ChiTwoMeasedMean.real, ChiTwoMeasedRealSTD, ChiTwoMeasedMean.imag,    ChiTwoMeasedImagSTD])
+out_lefttop = np.column_stack([IRWavenumber, ChiTwoMeasedMean.real, ChiTwoMeasedRealSTD, ChiTwoMeasedMean.imag, ChiTwoMeasedImagSTD])
 lefttop_path = os.path.join(FolderPath, "ChiTwoMeasured.txt")
 np.savetxt(lefttop_path, out_lefttop, delimiter=',', header="IRWavenumber(cm^-1), Re_mean, Re_std, Im_mean, Im_std", comments='', fmt="%.6f, %.10e, %.10e, %.10e, %.10e")
 print(f"[Output INFO] Fig3 left-top saved to {lefttop_path}")
