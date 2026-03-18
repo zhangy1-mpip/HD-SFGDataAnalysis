@@ -27,33 +27,35 @@ RefMaterial='zqz'
 Media1 = 'air'
 Media2 = 'H2O'
 # file path of parameter of the reference materials
-ParaPath = r'D:\Zhang Yu Data\MPI-P\SFG\Script\Parameters' 
+ParaPath = r'C:\Users\zhangy1\Data\SFG Analysis Scripts\Parameters' 
 # folder of the experiment files, including backgrounds, reference and experiment data
 # REMEMBER TO CHANGE THIS
-FolderPath = r'D:\Zhang Yu Data\MPI-P\SFG\20260310\12_k3_0,5M_pH11'
+FolderPath = r'C:\Users\zhangy1\Data\Lipopeptide\SFG\20260316\06_K3_0,5M_pH3_1800s'
+# Sample name series: remember to change to the sample nominator such as ionic strength and pH
+SampleNominator = "0,5M"
 
 # experiment conditions
 # reference exposure time
-RefExposure = 1
+RefExposure = 500
 # sample exposure time
-SamExposure = 300
+SamExposure = 1800
 
 # vis wavelength
-VisWavelength = 805.5
+VisWavelength = 802
 # incident angles in air in degree
 VisIncidentAngle = 45
 IRIncidentAngle = 45
 
 # phase correction for the phase drift
-PhaseCorr = 3
+PhaseCorr = 0
 
 # the window for plot
 Frequency_min = 2800
-Frequency_max = 3800
+Frequency_max = 3600
 Amplitude_min = -0.1
 Amplitude_max = 0.1
-ChiTwoFig_min = -20
-ChiTwoFig_max = 20
+ChiTwoFig_min = -2
+ChiTwoFig_max = 2
 # figure size in inch
 figwidth = 12
 figheight = 9
@@ -81,7 +83,7 @@ PlanckTaperFilterMin = 0.02     # set the minimum value of the filter, avoiding 
 # pre-ifft Happ-Genzel filter TimeDomainFilter in time domain
 # parameters for SFG peaks; T0 is the SFG/LO delay time
 T0LBoundary = 0.6     # filter starts at LBoundary*T0, 
-T0RBoundary = 1.2     # filter ends at LBoundary*T0, T0 is the SFG/LO delay time
+T0RBoundary = 1.3     # filter ends at LBoundary*T0, T0 is the SFG/LO delay time
 HGWidthT0Ratio = 0.2  # [width of the ramping area]/T0, T0 is the SFG/LO delay time
 # for reflection peaks, better not to use it; T1 is the reflection delay time
 T1LRel = 0.0        # filter starts at T1-T1LRelT1*T0
@@ -109,7 +111,9 @@ SPIKE_SAFE_EPS = 1e-12
     # input FolderPath: the absolute path of the data storage folder 
     # return Lists: the dictionary contains 6 lists: 1. GoldBg: Gold background 2. GoldRef: Gold references 3. WaterBg: Water experiment background 4. WaterExp: Water experiment data files 5. D2ORef: D2O reference data 6. D2OExp: D2O experiment data.
     # change the keywords "gold" to "zqz" for the quartz reference.
-def SortDataFile (FolderPath):
+def SortDataFile (FolderPath, SampleNominator):
+    # initialize the sort parameters
+    SampleKeywords = SampleNominator.lower()
     SortResult = {
          "GoldBg": [],
          "GoldRef": [],
@@ -122,12 +126,11 @@ def SortDataFile (FolderPath):
      }
     
     for filename in os.listdir(FolderPath):
-        
         name = filename.lower()
         # find all the .asc files
         if name.endswith(".csv"):
             has_bg = "bg" in name
-            has_water = ("water" in name) or ("h2o" in name)
+            has_water = ("water" in name) or ("h2o" in name) or (SampleKeywords in name)
             has_zqz = "zqz" in name
             has_gold = "gold" in name
             has_D2O = "d2o" in name
@@ -135,10 +138,10 @@ def SortDataFile (FolderPath):
             # sorting the files
             if has_gold and has_bg: SortResult["GoldBg"].append(filename)
             elif has_gold and not has_bg: SortResult["GoldRef"].append(filename)
-            elif has_water and has_bg: SortResult["WaterBg"].append(filename)
-            elif has_water and not has_bg: SortResult["WaterExp"].append(filename)
             elif has_D2O and has_bg: SortResult["D2OBg"].append(filename)
             elif has_D2O and not has_bg: SortResult["D2ORef"].append(filename)
+            elif has_water and has_bg: SortResult["WaterBg"].append(filename)
+            elif has_water and not has_bg: SortResult["WaterExp"].append(filename)
             elif has_zqz and has_bg: SortResult["zqzBg"].append(filename)
             elif has_zqz and not has_bg: SortResult["zqzRef"].append(filename)
     
