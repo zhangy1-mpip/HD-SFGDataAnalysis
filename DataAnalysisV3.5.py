@@ -8,6 +8,7 @@ from datetime import datetime
 from scipy.interpolate import PchipInterpolator as Pchi
 from scipy.constants import c
 from scipy.signal import savgol_filter
+from scipy.signal import medfilt
 
 # ========== References ==========  
 # 1. Takeshita, N.; Okuno, M.; Ishibashi, T. A. Molecular conformation of DPPC phospholipid Langmuir and Langmuir-Blodgett monolayers studied by heterodyne-detected vibrational sum frequency generation spectroscopy. Phys Chem Chem Phys 2017, 19 (3), 2060-2066.
@@ -26,33 +27,33 @@ RefMaterial='zqz'
 Media1 = 'air'
 Media2 = 'H2O'
 # file path of parameter of the reference materials
-ParaPath = r'C:\Users\zhangy1\Data\Scripts\Parameters' 
+ParaPath = r'D:\Zhang Yu Data\MPI-P\SFG\Script\Parameters' 
 # folder of the experiment files, including backgrounds, reference and experiment data
 # REMEMBER TO CHANGE THIS
-FolderPath = r'C:\Users\zhangy1\Data\Lipopeptide\SFG\20260106\asc\01'
+FolderPath = r'D:\Zhang Yu Data\MPI-P\SFG\20260310\12_k3_0,5M_pH11'
 
 # experiment conditions
 # reference exposure time
-RefExposure = 120
+RefExposure = 1
 # sample exposure time
-SamExposure = 240
+SamExposure = 300
 
 # vis wavelength
 VisWavelength = 805.5
 # incident angles in air in degree
-VisIncidentAngle = 64
-IRIncidentAngle = 50
+VisIncidentAngle = 45
+IRIncidentAngle = 45
 
 # phase correction for the phase drift
-PhaseCorr = 63
+PhaseCorr = 3
 
 # the window for plot
 Frequency_min = 2800
 Frequency_max = 3800
-Amplitude_min = -0.2
-Amplitude_max = 0.2
-ChiTwoFig_min = -3
-ChiTwoFig_max = 3
+Amplitude_min = -0.1
+Amplitude_max = 0.1
+ChiTwoFig_min = -20
+ChiTwoFig_max = 20
 # figure size in inch
 figwidth = 12
 figheight = 9
@@ -62,40 +63,46 @@ figheight = 9
 # lorentz type: n' = n_j
 # slab type: n' = (n_i^2(n_i^2+5)/(4n_i^2+2))^(1/2)
 ModelType = 'lorentz' 
-PolarizationType = 'ssp'
+PolarizationType = 'psp'
 
 # parameters to locate the SFG/LO delay time T0 and reflection delay time T1
-n_skip=10   # skip the data points for the optic rectification
+n_skip=20   # skip the data points for the optic rectification
 frac=0.1    # defined the threshold of the peak decay
 margin=5    # add some safety points for the reflection peak search
 
 # pre-fft Plank-taper filter configuration
 # go to function EstimateFringeWidth and PlanckTaperFilter to see the definition
 PlanckEps = 0.2 # the sharpness of ramping area
-NoofPeaks = 2   # no. of peaks treated in the left
-LRRatio= 2.5    # no. of peaks treated on the right/no. of peaks treated on the left
+NoofPeaks = 3   # no. of peaks treated in the left
+LRRatio= 2   # no. of peaks treated on the right/no. of peaks treated on the left
 PlanckFilterRatio_Max = 0.15    # maximum 15% data points are allowed to be treated
 PlanckTaperFilterMin = 0.02     # set the minimum value of the filter, avoiding 0 as divider
 
 # pre-ifft Happ-Genzel filter TimeDomainFilter in time domain
 # parameters for SFG peaks; T0 is the SFG/LO delay time
-T0LBoundary = 0.8     # filter starts at LBoundary*T0, 
+T0LBoundary = 0.6     # filter starts at LBoundary*T0, 
 T0RBoundary = 1.2     # filter ends at LBoundary*T0, T0 is the SFG/LO delay time
 HGWidthT0Ratio = 0.2  # [width of the ramping area]/T0, T0 is the SFG/LO delay time
 # for reflection peaks, better not to use it; T1 is the reflection delay time
 T1LRel = 0.0        # filter starts at T1-T1LRelT1*T0
 T1RRel = 0.0        # filter ends at T1+T1LRelT1*T0
 # T1 valley is used to filter out the reflection peaks
-eps = 1.0                           # base of the noise on the right side of time axis, eps=1 means no compression of noise
+eps = 0.5                           # base of the noise on the right side of time axis, eps=1 means no compression of noise
 NoiseSamplingStartinPs = 5.5        # starting time of the noise sampling
 NoiseHGRampinginPs = 0.2            # ramping width of the Happ-Genzel window for noise
 T1ValleyHalfRatio = 0.6             # width of valley = T1ValleyHalfRatio x T0 plateau width x 2
 ValleyHGRatio = 0.3                 # width of HG ramping / width of T1 valley
 
 # Savitzky–Golay smoothing parameters
-SG_WINDOW = 7       # has to be odd and <= number of frequencies
+SG_WINDOW = 21       # has to be odd and <= number of frequencies
 SG_POLY = 3         # order of smoothing: =1: linear interpolation, =2 parabola interpolation, =3 cubic-parabola-linear combination 
 
+# Spike removal parameters
+SPIKE_REMOVE = True
+SPIKE_KERNEL = 131
+SPIKE_THRESHOLD_FACTOR = 5.0
+SPIKE_MIN_FILES = 3
+SPIKE_SAFE_EPS = 1e-12
 # ========== file manipulation functions ==========
 
 # read the asc raw data file and sort the file according to the different
@@ -118,7 +125,7 @@ def SortDataFile (FolderPath):
         
         name = filename.lower()
         # find all the .asc files
-        if name.endswith(".asc"):
+        if name.endswith(".csv"):
             has_bg = "bg" in name
             has_water = ("water" in name) or ("h2o" in name)
             has_zqz = "zqz" in name
@@ -253,6 +260,62 @@ def BgSubtract (Folder, BgGroup, ExpDataGroup):
 
     SpectraBgSub = np.stack(ExpDataBgSub_Temp, axis=0)
     return SpectraBgSub
+
+# remove the isolated spikes in the signal
+def RemoveSpikeOutliers (Spectra, Reference, KernelSize, ThresholdFactor, MinFiles, SpikeSafeEps):
+    spectra = np.asarray(Spectra, dtype = float).copy()
+    
+    # check if the spectra is in correct shape
+    if spectra.ndim != 2:
+        raise ValueError('[Spike Removal INFO] Spectra is not 2D array!')
+
+    # check if there are enough files for analysis
+    n_spec, _ = spectra.shape
+    if n_spec < MinFiles:
+        print(f'[Spike Removal INFO] Only {n_spec} spectra, skip spike removal.')
+
+    # ensure the kernel size is correct
+    if KernelSize % 2 == 0:
+        KernelSize = KernelSize + 1
+
+    # check if there are enough reference
+    if Reference is None:
+        Reference = Spectra[0]
+    else:
+        Reference = np.asarray(Reference, dtype = float)
+
+    # remove the spike
+    SpectraDelBack = []
+    SpectraBack = []
+    for i in range(n_spec):
+        DiffToRef = spectra[i] - Reference
+        Baseline_i = medfilt(DiffToRef, KernelSize)
+        SpectraDelBack.append(Spectra[i] - Baseline_i)
+        SpectraBack.append(Baseline_i)
+
+    SpectraDelBack = np.asarray(SpectraDelBack)
+    SpectraBack = np.array(SpectraBack)
+
+    PointwiseMedian = np.median(SpectraDelBack, axis = 0)
+    PointwiseStd = np.std(SpectraBack, axis = 0)
+    denom = np.maximum(np.abs(PointwiseMedian), SpikeSafeEps)
+
+    RelativeScatter = PointwiseStd/denom
+    ScatterFloor = medfilt(RelativeScatter, KernelSize)
+    ScatterFloor = np.maximum(ScatterFloor, SpikeSafeEps)
+
+    Cleaned = SpectraDelBack.copy()
+    NumDeleted = 0
+    for i in range(n_spec):
+        deviation = np.abs(Cleaned[i]-PointwiseMedian)/denom
+        SpikeMask = deviation > (ThresholdFactor*ScatterFloor)
+        NumDeleted = NumDeleted+np.count_nonzero(SpikeMask)
+        Cleaned[i,SpikeMask] = PointwiseMedian[SpikeMask]
+
+    Restored = Cleaned + SpectraBack
+    print(f'[Spike Removal INFO] Remove {NumDeleted} spike points from {n_spec} spectra.')
+    return Restored
+
 
 # calculate the Fresnel coefficients T and R
     # n_i, n_j: frequency-dependent refractive indices in medium i and j
@@ -581,7 +644,7 @@ def FFTFromFreqToTime (Frequency, Signal):
 # n_skip: no. of data points representing optic rectification
 # frac: the decay ratio of T0 peak, when [Amplitude of signal]/[Amplitude of T0 peak] < frac, the T0 peak is set to be over
 # margin: number of data points to jump for safe search of reflection peak
-def FindDelayTime (Time, Amplitude, n_skip=10, frac=0.1, margin=5):
+def FindDelayTime (Time, Amplitude, n_skip, frac, margin):
     # find the SFG peak    
     AbsAmp = np.abs(Amplitude)
     TimeP = Time > 0
@@ -816,10 +879,20 @@ if len(RefBgList)==0 or len(RefList)==0:
 else: 
     # start analyzing the reference
     print(f"Start analyzing the reference:")
-    #RefBgSub is a array of background-subtracted reference
-    RefBgSub = BgSubtract(FolderPath, RefBgList, RefList) 
+    #RefBgSubRaw is a array of background-subtracted reference
+    RefBgSubRaw = BgSubtract(FolderPath, RefBgList, RefList) 
     print(f"[Exp Config INFO] Reference is {RefMaterial} spectra.")
-    print(f"[Exp Config INFO] In total {RefBgSub.shape[0]} {RefMaterial} reference files.")
+    print(f"[Exp Config INFO] In total {RefBgSubRaw.shape[0]} {RefMaterial} reference files.")
+    
+    # remove the spikes in the reference spectra
+    # RemoveSpikeOutliers (Spectra, Reference, KernelSize, ThresholdFactor, MinFiles, SpikeSafeEps)
+    if SPIKE_REMOVE:
+        RefBgSub = RemoveSpikeOutliers(RefBgSubRaw, RefBgSubRaw[0],SPIKE_KERNEL, SPIKE_THRESHOLD_FACTOR, SPIKE_MIN_FILES, SPIKE_SAFE_EPS)
+    else:
+        BgRefSub = BgRefSub.copy()
+
+    # calculate the mean of the background-subtracted reference
+    RefSpectra = RefBgSub.mean(axis=0)
     
     # extract SFG and IR frequency (in cm-1)
     Filepath = os.path.join(FolderPath, RefList[0])
@@ -828,9 +901,6 @@ else:
     # create the frequency axis in Hz
     TemporalFrequency_SFG, TemporalFrequency_IR = Omega_SFG*c*100, Omega_IR*c*100
    
-    # calculate the mean of the background-subtracted reference
-    RefSpectra = RefBgSub.mean(axis=0)
-    
     # prepare the frequency uniformly distributed data
     UniFreRef, IntpRef = UniDisTreat(TemporalFrequency_SFG, RefSpectra)
         
@@ -854,8 +924,14 @@ else:
     print(f"[Sample INFO] In total {len(SampleBgList)} water background files.")
     
     # RawSampleBgSub is a array of background-subtracted reference
-    RawSampleBgSub = BgSubtract(FolderPath, SampleBgList, SampleList) 
-  
+    RawSampleBgSubRaw = BgSubtract(FolderPath, SampleBgList, SampleList) 
+    
+    # remove the spike for the sample
+    if SPIKE_REMOVE:
+        RawSampleBgSub = RemoveSpikeOutliers(RawSampleBgSubRaw, RawSampleBgSubRaw[0],SPIKE_KERNEL, SPIKE_THRESHOLD_FACTOR, SPIKE_MIN_FILES, SPIKE_SAFE_EPS)
+    else:
+        RawSampleBgSub = RawSampleBgSubRaw.copy()
+
     # calculate the mean of the background-subtracted experiment data files
     SampleBgSub = RawSampleBgSub.mean(axis=0)
     
@@ -879,7 +955,7 @@ else:
 PeakWidth = EstimateFringeWidth(IntpRef)
 
     # pre-fft filter preparation
-PreFFTFilter = PlanckTaperFilter(len(UniFreRef),PeakWidth,NoofPeaks,LRRatio,PlanckFilterRatio_Max,PlanckEps, PlanckTaperFilterMin)
+PreFFTFilter = PlanckTaperFilter(len(UniFreRef),7,NoofPeaks,LRRatio,PlanckFilterRatio_Max,PlanckEps, PlanckTaperFilterMin)
     # filtered reference
 RefForFFT = IntpRef * PreFFTFilter
 
@@ -887,7 +963,7 @@ RefForFFT = IntpRef * PreFFTFilter
 DelayTime, CompAmplitude = FFTFromFreqToTime(UniFreRef, RefForFFT)
 
 # Find the location of SFG signal in time domain (i.e. time difference between SFG and LO) based on the reference spectra
-T0, T1 = FindDelayTime (DelayTime, CompAmplitude, n_skip=10, frac=0.1, margin=5)
+T0, T1 = FindDelayTime (DelayTime, CompAmplitude, n_skip, frac, margin)
 
 # time domain filter of the reference signal
 TimeWindow, NumOnes = TimeDomainFilter(DelayTime, T0, T1, T0LBoundary, T0RBoundary, HGWidthT0Ratio, T1LRel, T1RRel,eps, NoiseSamplingStartinPs,NoiseHGRampinginPs, T1ValleyHalfRatio, ValleyHGRatio)
@@ -1148,7 +1224,7 @@ RefiFFT = axs1[1,1]
 # top left figure: plot the background subtracted reference, mean reference (background subtracted), interpolated reference, filter and filtered reference.
     # all raw data
 for i in range(RefBgSub.shape[0]):
-    RefFig.plot(TemporalFrequency_SFG*1e-14, RefBgSub[i], alpha=0.25, linewidth=1)
+    RefFig.plot(TemporalFrequency_SFG*1e-14, RefBgSub[i], alpha=0.5, linewidth=1)
     # average reference
 RefFig.plot(TemporalFrequency_SFG*1e-14, RefSpectra, linewidth=1, color='black', label='Average reference')
     # interpolated reference
@@ -1194,7 +1270,7 @@ RefFFT.legend(lines1 + lines2, labels1 + labels2, loc='best')
 # bottom left figure: plot the phase data
 for i in range(NumOfRef):
     PhaseRef_i = np.unwrap(PhaseRef[i,:])    
-    RefPhase.plot(IRWavenumber, np.rad2deg(PhaseRef_i), alpha=0.25, linewidth=0.5)
+    RefPhase.plot(IRWavenumber, np.rad2deg(PhaseRef_i), alpha=0.5, linewidth=0.5)
 PhaseRefMean_unwrap = np.unwrap(PhaseRefMean)
 RefPhase.plot(IRWavenumber, np.rad2deg(PhaseRefMean_unwrap), color='black', linewidth=1, label='Mean phase')
 RefPhase.set_xlabel(r'$\nu_{\mathrm{IR}} \mathrm{[cm^{-1}]}$')
@@ -1226,7 +1302,7 @@ SampleiFFT = axs2[1,1]
 # top left figure: plot the background subtracted Sample, mean Sample (background subtracted), interpolated Sample, filter and filtered Sample.
     # all raw data
 for i in range(RawSampleBgSub.shape[0]):
-    SampFig.plot(TemporalFrequency_SFG*1e-14, RawSampleBgSub[i], alpha=0.25, linewidth=1)
+    SampFig.plot(TemporalFrequency_SFG*1e-14, RawSampleBgSub[i], alpha=0.5, linewidth=1)
     # average reference
 SampFig.plot(TemporalFrequency_SFG*1e-14, SampleBgSub, linewidth=1, color='black', label='Average sample')
     # interpolated reference
@@ -1270,7 +1346,7 @@ SampleFFT.legend(lines1 + lines2, labels1 + labels2, loc='best')
 # bottom left figure: plot the phase data
 for i in range(NumOfSamp):
     PhaseUnwrap_i = np.unwrap(PhaseSamp_all[i,:])
-    SamplePhase.plot(IRWavenumber, np.rad2deg(PhaseUnwrap_i), alpha=0.2, linewidth=1)
+    SamplePhase.plot(IRWavenumber, np.rad2deg(PhaseUnwrap_i), alpha=0.5, linewidth=1)
 PhaseSampMean_unwrap = np.unwrap(PhaseSampMean)
 SamplePhase.plot(IRWavenumber, np.rad2deg(PhaseSampMean_unwrap), color='black', linewidth=1, label='Mean phase')
 SamplePhase.set_xlabel(r'$\nu_{\mathrm{IR}}$ [cm$^{-1}$]')
@@ -1332,7 +1408,7 @@ Fresnel.legend(hL+hR, lL+lR, frameon=True)
 
     # bottom left panel: phase of \chi^(2)
 for i in range(NumOfSamp):
-    ChiTwoMeasedPhase.plot(IRWavenumber, np.degrees(PhaseChiTwo_all[i,:]), linewidth=1, alpha=0.25)
+    ChiTwoMeasedPhase.plot(IRWavenumber, np.degrees(PhaseChiTwo_all[i,:]), linewidth=1, alpha=0.5)
 ChiTwoMeasedPhase.plot(IRWavenumber, np.degrees(PhaseChiTwoMean), linewidth=1, color='black', label='Mean phase')
 ChiTwoMeasedPhase.set_xlabel(r'$\nu_{\mathrm{IR}} \mathrm{[cm^{-1}]}$')
 ChiTwoMeasedPhase.set_ylabel('Phase [degree]')
@@ -1353,6 +1429,49 @@ ChiTwo.set_xlim(Frequency_min, Frequency_max)
 ChiTwo.set_ylim(ChiTwoFig_min, ChiTwoFig_max)
 ChiTwo.grid(True)
 ChiTwo.legend()
+
+# fig4: raw vs despiked spectra of reference and sample
+fig4, axs4 = plt.subplots(2, 2, figsize = (figwidth, figheight), constrained_layout=True)
+Fig4SampleRaw = axs4[0, 0]
+Fig4SampleClean = axs4[1, 0]
+Fig4RefRaw = axs4[0, 1]
+Fig4RefClean = axs4[1, 1]
+
+for i in range(RawSampleBgSubRaw.shape[0]):
+    Fig4SampleRaw.plot(TemporalFrequency_SFG_Samp*1e-14, RawSampleBgSubRaw[i], alpha=0.5, linewidth=1)
+Fig4SampleRaw.plot(TemporalFrequency_SFG_Samp*1e-14, RawSampleBgSubRaw.mean(axis=0), color='black', linewidth=1.2, label='Mean raw sample')
+Fig4SampleRaw.set_xlabel(r"$f_{\mathrm{vis}}+f_{\mathrm{IR}}\,\mathrm{[10^{14} Hz]}$")
+Fig4SampleRaw.set_ylabel('Counts')
+Fig4SampleRaw.set_title('All raw sample spectra')
+Fig4SampleRaw.grid(True)
+Fig4SampleRaw.legend(loc='best')
+
+for i in range(RawSampleBgSub.shape[0]):
+    Fig4SampleClean.plot(TemporalFrequency_SFG_Samp*1e-14, RawSampleBgSub[i], alpha=0.5, linewidth=1)
+Fig4SampleClean.plot(TemporalFrequency_SFG_Samp*1e-14, SampleBgSub, color='black', linewidth=1.2, label='Mean despiked sample')
+Fig4SampleClean.set_xlabel(r"$f_{\mathrm{vis}}+f_{\mathrm{IR}}\,\mathrm{[10^{14} Hz]}$")
+Fig4SampleClean.set_ylabel('Counts')
+Fig4SampleClean.set_title('Sample spectra after spike removal')
+Fig4SampleClean.grid(True)
+Fig4SampleClean.legend(loc='best')
+
+for i in range(RefBgSubRaw.shape[0]):
+    Fig4RefRaw.plot(TemporalFrequency_SFG*1e-14, RefBgSubRaw[i], alpha=0.5, linewidth=1)
+Fig4RefRaw.plot(TemporalFrequency_SFG*1e-14, RefBgSubRaw.mean(axis=0), color='black', linewidth=1.2, label='Mean raw reference')
+Fig4RefRaw.set_xlabel(r"$f_{\mathrm{vis}}+f_{\mathrm{IR}}\,\mathrm{[10^{14} Hz]}$")
+Fig4RefRaw.set_ylabel('Counts')
+Fig4RefRaw.set_title(f'All raw {RefMaterial} reference spectra')
+Fig4RefRaw.grid(True)
+Fig4RefRaw.legend(loc='best')
+
+for i in range(RefBgSub.shape[0]):
+    Fig4RefClean.plot(TemporalFrequency_SFG*1e-14, RefBgSub[i], alpha=0.5, linewidth=1)
+Fig4RefClean.plot(TemporalFrequency_SFG*1e-14, RefSpectra, color='black', linewidth=1.2, label='Mean despiked reference')
+Fig4RefClean.set_xlabel(r"$f_{\mathrm{vis}}+f_{\mathrm{IR}}\,\mathrm{[10^{14} Hz]}$")
+Fig4RefClean.set_ylabel('Counts')
+Fig4RefClean.set_title(f'{RefMaterial} reference spectra after spike removal')
+Fig4RefClean.grid(True)
+Fig4RefClean.legend(loc='best') 
 
 # analysis result saving
     # result of the normalized \chi^{(2)}
