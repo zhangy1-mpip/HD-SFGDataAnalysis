@@ -30,7 +30,7 @@ Media2 = 'H2O'
 ParaPath = r'C:\Users\zhangy1\Data\SFG Analysis Scripts\Parameters' 
 # folder of the experiment files, including backgrounds, reference and experiment data
 # REMEMBER TO CHANGE THIS
-FolderPath = r'C:\Users\zhangy1\Data\Lipopeptide\SFG\20260316\06_K3_0,5M_pH3_1800s'
+FolderPath = r'C:\Users\zhangy1\Data\Lipopeptide\SFG\20260316\01_K3_0,5M_pH11_psp_1800s'
 # Sample name series: remember to change to the sample nominator such as ionic strength and pH
 SampleNominator = "0,5M"
 
@@ -47,15 +47,16 @@ VisIncidentAngle = 45
 IRIncidentAngle = 45
 
 # phase correction for the phase drift
-PhaseCorr = 0
+PhaseCorr = -7
 
 # the window for plot
 Frequency_min = 2800
 Frequency_max = 3600
-Amplitude_min = -0.1
-Amplitude_max = 0.1
+Amplitude_min = -0.2
+Amplitude_max = 0.2
 ChiTwoFig_min = -2
 ChiTwoFig_max = 2
+HomodyneLimit = 0.02
 # figure size in inch
 figwidth = 12
 figheight = 9
@@ -83,7 +84,7 @@ PlanckTaperFilterMin = 0.02     # set the minimum value of the filter, avoiding 
 # pre-ifft Happ-Genzel filter TimeDomainFilter in time domain
 # parameters for SFG peaks; T0 is the SFG/LO delay time
 T0LBoundary = 0.6     # filter starts at LBoundary*T0, 
-T0RBoundary = 1.3     # filter ends at LBoundary*T0, T0 is the SFG/LO delay time
+T0RBoundary = 1.29     # filter ends at LBoundary*T0, T0 is the SFG/LO delay time
 HGWidthT0Ratio = 0.2  # [width of the ramping area]/T0, T0 is the SFG/LO delay time
 # for reflection peaks, better not to use it; T1 is the reflection delay time
 T1LRel = 0.0        # filter starts at T1-T1LRelT1*T0
@@ -850,7 +851,7 @@ save_analysis_parameters(FolderPath)
 
 # ***** file manipulation *****
 # data file sort
-FileSortResult = SortDataFile(FolderPath)
+FileSortResult = SortDataFile(FolderPath, SampleNominator)
 
 # find out what is the reference material
 if RefMaterial == 'gold':
@@ -1158,9 +1159,11 @@ ChiTwoMeasedMean = np.mean(ChiTwoMeased_all, axis=0)
 ChiTwoMeasedRealSTD = np.std(ChiTwoMeased_all.real, axis=0)
 ChiTwoMeasedImagSTD = np.std(-ChiTwoMeased_all.imag, axis=0)
     # simulation for homodyne \chi^{(2)}_{measured}
-ChiTwoMeased2 = np.abs(ChiTwoMeased_all)**2
-ChiTwoMeased2Mean = np.mean(ChiTwoMeased2, axis=0)
-ChiTwoMeased2STD = np.std(ChiTwoMeased2, axis=0)
+ChiTwoHomodyne_all = np.abs(ChiTwoMeased_all)**2
+ChiTwoHomodyneMean = np.mean(ChiTwoHomodyne_all, axis=0)
+ChiTwoHomodyneSTD = np.std(ChiTwoHomodyne_all, axis=0)
+    #  save the homodyne data
+HomodyneData = np.column_stack((IRWavenumber, ChiTwoHomodyneMean, ChiTwoHomodyneSTD))
 
 # calculate the Fresnel factors to translate effective \chi^{(2)} to tensor components
 # refractive indices in Media2 for vis/IR (complex)
@@ -1476,18 +1479,37 @@ Fig4RefClean.set_title(f'{RefMaterial} reference spectra after spike removal')
 Fig4RefClean.grid(True)
 Fig4RefClean.legend(loc='best') 
 
+# fig5 homodyne signal calculated from heterodyne results
+fig5, ax = plt.subplots(figsize=(figwidth/2, figheight/2))
+
+ax.plot(IRWavenumber, ChiTwoHomodyneMean, color='g', linewidth=1, label='Homodyne')
+ax.fill_between(IRWavenumber, ChiTwoHomodyneMean - ChiTwoHomodyneSTD, ChiTwoHomodyneMean + ChiTwoHomodyneSTD, color='g', alpha=0.3, label='Homodyne STD')
+ax.set_xlim(Frequency_min, Frequency_max)
+ax.set_ylim(0, HomodyneLimit)
+ax.set_xlabel(r'Wavenumber / cm$^{-1}$')
+ax.set_ylabel('Homodyne intensity / a.u.')
+ax.set_title("Calculated homodyne")
+ax.grid(True)
+plt.tight_layout()
+
 # analysis result saving
     # result of the normalized \chi^{(2)}
 out_lefttop = np.column_stack([IRWavenumber, ChiTwoMeasedMean.real, ChiTwoMeasedRealSTD, ChiTwoMeasedMean.imag, ChiTwoMeasedImagSTD])
 lefttop_path = os.path.join(FolderPath, "ChiTwoMeasured.txt")
-np.savetxt(lefttop_path, out_lefttop, delimiter=',', header="IRWavenumber(cm^-1), Re_mean, Re_std, Im_mean, Im_std", comments='', fmt="%.6f, %.10e, %.10e, %.10e, %.10e")
+np.savetxt(lefttop_path, out_lefttop, delimiter=',', header="IRWavenumber(cm^-1),Re_mean,Re_std,Im_mean,Im_std", comments='', fmt=["%.6f", "%.10e", "%.10e", "%.10e", "%.10e"])
 print(f"[Output INFO] Fig3 left-top saved to {lefttop_path}")
 
     # result of the tensor component
 out_rightbot = np.column_stack([IRWavenumber, -ChiTwoCompMean.real, ChiTwoCompRealSTD, -ChiTwoCompMean.imag, ChiTwoCompImagSTD])
 rightbot_path = os.path.join(FolderPath, "ChiTwoTensorComponent.txt")
-np.savetxt(rightbot_path, out_rightbot, delimiter=',', header="IRWavenumber(cm^-1),Re_mean,Re_std,Im_mean,Im_std", comments='', fmt="%.6f,%.10e,%.10e,%.10e,%.10e")
+np.savetxt(rightbot_path, out_rightbot, delimiter=',', header="IRWavenumber(cm^-1),Re_mean,Re_std,Im_mean,Im_std", comments='', fmt=["%.6f", "%.10e", "%.10e", "%.10e", "%.10e"])
 print(f"[Output INFO] Fig3 bottom-right saved to {lefttop_path}")
+
+    # save the homodyne data
+HomodyneHeader = "IRWavenumber(cm^-1),Intensity_a.u.,std_a.u."
+HomodynePath = os.path.join(FolderPath, "Homodyne.txt")
+np.savetxt(HomodynePath, HomodyneData, delimiter=",", header=HomodyneHeader, comments="", fmt=["%.6f", "%.10e", "%.10e"])
+print(f"[Output INFO] Homodyne data saved to: {HomodynePath}")
 
     # save the figure
 mpl.rcParams['pdf.fonttype'] = 42
@@ -1496,5 +1518,6 @@ mpl.rcParams['ps.fonttype']  = 42
 fig1.savefig(os.path.join(FolderPath, "Reference.pdf"), format="pdf", bbox_inches="tight")
 fig2.savefig(os.path.join(FolderPath, "Sample.pdf"), format="pdf", bbox_inches="tight")
 fig3.savefig(os.path.join(FolderPath, "ChiTwo.pdf"), format="pdf", bbox_inches="tight")
+fig5.savefig(os.path.join(FolderPath, "Homodyne.pdf"), format="pdf", bbox_inches='tight')
 
 plt.show()
